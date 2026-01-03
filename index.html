@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>SKRC wav → ogg 一括変換ツール【Android完全安定版】</title>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<style>
+body {
+  background:#111;
+  color:#eee;
+  font-family:sans-serif;
+  padding:20px;
+}
+button {
+  padding:10px 20px;
+  font-size:16px;
+}
+#log {
+  white-space:pre-line;
+  margin-top:15px;
+  font-size:14px;
+}
+</style>
+</head>
+
+<body>
+<h2>SKRC wav → ogg 一括変換ツール（Android完全安定版）</h2>
+
+<input type="file" id="zip" accept=".zip"><br><br>
+<button onclick="start()">変換開始</button>
+
+<div id="log"></div>
+
+<script>
+function log(t){
+  document.getElementById("log").textContent += t + "\n";
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let audioCtx = null;
+
+// ★ wav → ogg（Android最安定構成）
+async function wavToOgg(blob){
+  if(!audioCtx){
+    audioCtx = new AudioContext();
+    await audioCtx.resume();
+  }
+
+  const buf = await blob.arrayBuffer();
+  const buffer = await audioCtx.decodeAudioData(buf);
+
+  const dest = audioCtx.createMediaStreamDestination();
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(dest);
+
+  const recorder = new MediaRecorder(dest.stream, { mimeType:"audio/ogg" });
+  const chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+
+  recorder.start();
+  src.start();
+
+  // 🔥 Android対策：再生時間 + 50ms で強制 stop
+  setTimeout(() => {
+    if(recorder.state !== "inactive"){
+      recorder.stop();
+    }
+  }, buffer.duration * 1000 + 50);
+
+  await new Promise(r => recorder.onstop = r);
+
+  return new Blob(chunks, { type:"audio/ogg" });
+}
+
+async function start(){
+  document.getElementById("log").textContent = "";
+
+  const file = document.getElementById("zip").files[0];
+  if(!file){
+    log("❌ zipが選択されていません");
+    return;
+  }
+
+  log("zip 読み込み中…");
+  const zip = await JSZip.loadAsync(file);
+  const out = new JSZip();
+
+  let count = 0;
+
+  for(const name of Object.keys(zip.files)){
+    if(!name.endsWith(".wav")) continue;
+
+    count++;
+    log(`変換中: ${name}`);
+
+    const wav = await zip.files[name].async("blob");
+    const ogg = await wavToOgg(wav);
+    out.file(name.replace(".wav",".ogg"), ogg);
+
+    await sleep(100); // ★ 安定用インターバル
+  }
+
+  if(count === 0){
+    log("❌ wavが見つかりません");
+    return;
+  }
+
+  log("zip生成中…");
+  const blob = await out.generateAsync({ type:"blob" });
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "SKRC_ogg_converted.zip";
+  a.click();
+
+  log("✅ 完了！！全ファイル変換成功！！");
+}
+</script>
+</body>
+</html>
